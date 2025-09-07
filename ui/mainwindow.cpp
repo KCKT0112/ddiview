@@ -120,8 +120,19 @@ void MainWindow::BuildDdb(QProgressDialog *dlg)
         myfseek64(f, myftell64(f) - 4, SEEK_SET);
         dlg->setValue(myftell64(f) >> 4);
 
-        if (!strncmp(sig, "SND ", 4) || !strncmp(sig, "FRM2", 4)) {
-            auto chk = ChunkCreator::Get()->ReadFor(QByteArray(sig, 4), f);
+        QByteArray ddbChunkSig;
+        if (!strncmp(sig, "SND ", 4)) {
+            // We decide to save RAM and CPU time by only reading metadata of SND chunk when building DDB tree,
+            // but we can't set the class signature of ChunkRefSoundChunk to "SND " because it will clash with
+            // the actual ChunkSoundChunk, so we have to give SND chunk signature a special check here, and
+            // manually instruct it to read with ChunkRefSoundChunk class
+            ddbChunkSig = "____RefSND ";
+        } else if (!strncmp(sig, "FRM2", 4)) {
+            ddbChunkSig = "FRM2";
+        }
+
+        if (!ddbChunkSig.isEmpty()) {
+            auto chk = ChunkCreator::Get()->ReadFor(ddbChunkSig, f);
             // We DELIBERATELY use END offset so that lower_bound will happily return
             // the first chunk tail that we will meet after the requested point
             mDdbChunks[chk->GetOriginalOffset() + chk->GetSize() - 1] = chk;
