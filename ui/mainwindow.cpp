@@ -454,6 +454,7 @@ void MainWindow::on_treeStructure_currentItemChanged(QTreeWidgetItem *current, Q
 
     auto chunk = current->data(0, BaseChunk::ItemChunkRole).value<BaseChunk*>();
     auto props = chunk->GetPropertiesMap();
+    auto styleHints = qApp->styleHints();
 
     ui->listProperties->clear();
     for(auto i = props.cbegin(); i != props.cend(); i++) {
@@ -465,8 +466,12 @@ void MainWindow::on_treeStructure_currentItemChanged(QTreeWidgetItem *current, Q
         item->setData(BaseChunk::ItemOffsetRole, i.value().offset);
 
         // Make those "known values" (with proper typing) a bit more eye catching
-        if(i.value().type != PropRawHex)
-            item->setBackground(QColor(200, 255, 200));
+        if(i.value().type != PropRawHex) {
+            if (styleHints->colorScheme() == Qt::ColorScheme::Light)
+                item->setBackground(QColor(200, 255, 200));
+            else
+                item->setBackground(QColor(30, 100, 30));
+        }
         ui->listProperties->addItem(item);
 
     }
