@@ -620,7 +620,7 @@ void MainWindow::on_actionExportJson_triggered()
         return;
 
     auto sanitizeString = [](QString s) -> QString {
-        QString ret; QChar prev = 0;
+        QString ret; QChar prev = '\0';
         for(auto i : s) {
             if((i == '\"' || i == '\\') && (prev != '\\')) {
                 ret += '\\'; ret += i;

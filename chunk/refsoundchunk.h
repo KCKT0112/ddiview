@@ -9,7 +9,7 @@ public:
 
     }
 
-    static QByteArray ClassSignature() { return "SND "; }
+    static QByteArray ClassSignature() { return "____RefSND "; }
     virtual QByteArray ObjectSignature() { return ClassSignature(); }
 
     virtual void Read(FILE *file) {
