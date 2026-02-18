@@ -1,7 +1,5 @@
 # DDI/DDB Chunk 结构文档
 
-本文档基于 IDA Pro 反编译 Vocaloid 引擎得到的结构信息。
-
 ## 基础结构
 
 ### CChunk (基类)

@@ -7,6 +7,7 @@
 #include <QInputDialog>
 #include <QTableWidget>
 #include <QMessageBox>
+#include <QCryptographicHash>
 #include "chunk/chunkreaderguards.h"
 #include "mainwindow.h"
 #include "chunk/chunkcreator.h"
@@ -21,7 +22,9 @@
 #include "statisticsresultdialog.h"
 #include "articulationtabledialog.h"
 #include "ddiexportjsonoptionsdialog.h"
+#include "vqmgeneratordialog.h"
 #include "propertycontextmenu.h"
+#include "util/smsgenerator.h"
 #include "common.h"
 #include "util/util.h"
 
@@ -1672,27 +1675,36 @@ void MainWindow::on_actionPack_DevDB_triggered()
             }
         }
 
-        // Add a hash segment filled with 0x0DD171EA (DDIVIEW)
+        // Build final DDI with hash segment
         ddi.seek(0);
         auto phase1Ddi = ddi.readAll();
-        QByteArray finalDdi;
 
         // Hash is after PHDC, find its end
         auto phdc = SearchForChunkByPath({ "<Phoneme Dictionary>" }); assert(phdc);
-        finalDdi.append("\0\0\0\0\0\0\0\0DBSe", 12); // Fix header; DevDB = "DBS ", DB = DBSe
-        finalDdi.append(phase1Ddi.left(phdc->GetOriginalOffset() + phdc->GetSize()).mid(12));
 
-        // 260 bytes of filler
-        QByteArray filler;
-        while (filler.size() < 260) {
-            filler.append("\x0d\xd1\x71\xea", 4);
+        // Calculate MD4 hash of the DDB file content (not DDI!)
+        // The hash covers the entire DDB file that was just written
+        ddb.seek(0);
+        QByteArray ddbContent = ddb.readAll();
+
+        QCryptographicHash md4(QCryptographicHash::Md4);
+        md4.addData(ddbContent);
+        QByteArray hashResult = md4.result().toHex(); // 32 bytes hex string (lowercase)
+
+        // Pad hash to 260 bytes with zeros (as per Vocaloid implementation)
+        QByteArray hashSegment;
+        hashSegment.append(hashResult);
+        while (hashSegment.size() < 260) {
+            hashSegment.append('\0');
         }
-        filler.resize(260);
+        hashSegment.resize(260);
 
-        finalDdi.append(filler);
-
-        // Add final parts
-        finalDdi.append(phase1Ddi.mid(phdc->GetOriginalOffset() + phdc->GetSize()));
+        // Build final DDI: header + PHDC + hash segment + rest
+        QByteArray finalDdi;
+        finalDdi.append("\0\0\0\0\0\0\0\0DBSe", 12); // Fixed header
+        finalDdi.append(phase1Ddi.left(phdc->GetOriginalOffset() + phdc->GetSize()).mid(12)); // PHDC
+        finalDdi.append(hashSegment); // 260-byte hash segment
+        finalDdi.append(phase1Ddi.mid(phdc->GetOriginalOffset() + phdc->GetSize())); // Rest of DDI
 
         ddi.seek(0);
         ddi.write(finalDdi);
@@ -1856,5 +1868,99 @@ void MainWindow::on_treeStructureDdb_currentItemChanged(QTreeWidgetItem *current
 
         mWaveformPlot->replot();
     }
+}
+
+
+void MainWindow::on_actionVqmGenerator_triggered()
+{
+    VqmGeneratorDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QString wavPath = dlg.GetWavPath();
+    QString outputDir = dlg.GetOutputDir();
+    QString sampleName = dlg.GetSampleName();
+    double pitch = dlg.GetPitch();
+    double beginTime = dlg.GetBeginTime();
+    double endTime = dlg.GetEndTime();
+    int frameRate = dlg.GetFrameRate();
+    int maxHarmonics = dlg.GetMaxHarmonics();
+
+    if (wavPath.isEmpty() || outputDir.isEmpty() || sampleName.isEmpty()) {
+        QMessageBox::warning(this, tr("Missing Information"),
+                             tr("Please fill in all required fields."));
+        return;
+    }
+
+    // Create VQM subdirectory
+    QString vqmDir = outputDir + "/VQM";
+    QDir().mkpath(vqmDir);
+
+    // Progress dialog
+    QProgressDialog progDlg(tr("Generating VQM files..."), tr("Cancel"), 0, 4, this);
+    progDlg.setWindowModality(Qt::WindowModal);
+    progDlg.setMinimumDuration(0);
+    progDlg.show();
+
+    // Step 1: Analyze WAV
+    progDlg.setLabelText(tr("Analyzing WAV file..."));
+    progDlg.setValue(0);
+
+    SmsGenerator generator;
+    if (!generator.analyzeWav(wavPath, frameRate, maxHarmonics, beginTime, endTime)) {
+        QMessageBox::critical(this, tr("Analysis Failed"),
+                              tr("Failed to analyze WAV file:\n%1").arg(generator.getError()));
+        return;
+    }
+
+    if (progDlg.wasCanceled()) return;
+
+    // Step 2: Write SMS file
+    progDlg.setLabelText(tr("Writing SMS file..."));
+    progDlg.setValue(1);
+
+    QString smsPath = vqmDir + "/" + sampleName + ".sms";
+    if (!generator.writeSms(smsPath)) {
+        QMessageBox::critical(this, tr("Write Failed"),
+                              tr("Failed to write SMS file:\n%1").arg(generator.getError()));
+        return;
+    }
+
+    if (progDlg.wasCanceled()) return;
+
+    // Step 3: Copy WAV file
+    progDlg.setLabelText(tr("Copying WAV file..."));
+    progDlg.setValue(2);
+
+    QString dstWavPath = vqmDir + "/" + sampleName + ".wav";
+    if (!SmsGenerator::copyWav(wavPath, dstWavPath)) {
+        QMessageBox::critical(this, tr("Copy Failed"),
+                              tr("Failed to copy WAV file to output directory."));
+        return;
+    }
+
+    if (progDlg.wasCanceled()) return;
+
+    // Step 4: Write VQM.ini
+    progDlg.setLabelText(tr("Writing VQM.ini..."));
+    progDlg.setValue(3);
+
+    QString iniPath = outputDir + "/vqm.ini";
+    QString wavFilename = sampleName + ".wav";
+    if (!SmsGenerator::writeVqmIni(iniPath, sampleName, beginTime, endTime, pitch, wavFilename)) {
+        QMessageBox::critical(this, tr("Write Failed"),
+                              tr("Failed to write VQM.ini file."));
+        return;
+    }
+
+    progDlg.setValue(4);
+
+    QMessageBox::information(this, tr("VQM Generation Complete"),
+                             tr("VQM files generated successfully:\n\n"
+                                "SMS: %1\n"
+                                "WAV: %2\n"
+                                "INI: %3")
+                             .arg(smsPath, dstWavPath, iniPath));
 }
 

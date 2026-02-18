@@ -36,6 +36,9 @@ set(PROJECT_SOURCES
         ui/mediatoolwindow.h
         ui/mediatoolwindow.cpp
         ui/mediatoolwindow.ui
+        ui/vqmgeneratordialog.h
+        ui/vqmgeneratordialog.cpp
+        ui/vqmgeneratordialog.ui
 
         ui/propertycontextmenu.h
         ui/propertycontextmenu.cpp
@@ -45,6 +48,8 @@ set(PROJECT_SOURCES
 
         util/util.h
         util/util.cpp
+        util/smsgenerator.h
+        util/smsgenerator.cpp
 
         chunk/propertytype.h
         chunk/propertytype.cpp
